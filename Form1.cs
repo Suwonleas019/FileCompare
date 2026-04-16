@@ -55,7 +55,7 @@ namespace FileCompare
 
             if (sourceLV.SelectedItems.Count == 0)
             {
-                MessageBox.Show("복사할 파일을 선택하세요.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("복사할 항목을 선택하세요.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -63,45 +63,18 @@ namespace FileCompare
 
             foreach (ListViewItem item in sourceLV.SelectedItems)
             {
-                // 폴더(<DIR>)는 복사 제외 처리
-                if (item.SubItems.Count > 1 && item.SubItems[1].Text == "<DIR>")
-                    continue;
+                bool isDir = item.SubItems.Count > 1 && item.SubItems[1].Text == "<DIR>";
+                string itemName = item.Text;
+                string sourcePath = Path.Combine(sourceDir, itemName);
+                string destPath = Path.Combine(destDir, itemName);
 
-                string fileName = item.Text;
-                string sourcePath = Path.Combine(sourceDir, fileName);
-                string destPath = Path.Combine(destDir, fileName);
-
-                // 대상 경로에 파일이 이미 존재하는 경우 날짜 확인
-                if (File.Exists(destPath))
+                if (isDir)
                 {
-                    DateTime sourceTime = File.GetLastWriteTime(sourcePath);
-                    DateTime destTime = File.GetLastWriteTime(destPath);
-
-                    // 복사하려는 원본 파일이 대상 파일보다 오래된 경우
-                    if (sourceTime < destTime)
-                    {
-                        var result = MessageBox.Show(
-                            $"'{fileName}' 파일은 대상 폴더의 파일보다 지연된(오래된) 파일입니다.\n이전 버전의 파일로 덮어쓰시겠습니까?",
-                            "확인",
-                            MessageBoxButtons.YesNo,
-                            MessageBoxIcon.Warning);
-
-                        if (result != DialogResult.Yes)
-                        {
-                            continue; // 복사 취소하고 다음 파일로 넘어감
-                        }
-                    }
+                    CopyDirectoryRecursively(sourcePath, destPath, ref refreshNeeded);
                 }
-
-                try
+                else
                 {
-                    // 덮어쓰기 허용하여 복사
-                    File.Copy(sourcePath, destPath, true);
-                    refreshNeeded = true;
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"'{fileName}' 복사 중 오류 발생: {ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    CopySingleFile(sourcePath, destPath, itemName, ref refreshNeeded);
                 }
             }
 
@@ -111,6 +84,72 @@ namespace FileCompare
                 PopulateListView(lvwLeftDir, txtLeftDir.Text);
                 PopulateListView(lvwRightDir, txtRightDir.Text);
                 CompareFiles();
+            }
+        }
+
+        private void CopySingleFile(string sourcePath, string destPath, string fileName, ref bool refreshNeeded)
+        {
+            // 대상 경로에 파일이 이미 존재하는 경우 날짜 확인
+            if (File.Exists(destPath))
+            {
+                DateTime sourceTime = File.GetLastWriteTime(sourcePath);
+                DateTime destTime = File.GetLastWriteTime(destPath);
+
+                // 복사하려는 원본 파일이 대상 파일보다 오래된 경우
+                if (sourceTime < destTime)
+                {
+                    var result = MessageBox.Show(
+                        $"'{fileName}' 파일은 대상 폴더의 파일보다 지연된(오래된) 파일입니다.\n이전 버전의 파일로 덮어쓰시겠습니까?",
+                        "확인",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning);
+
+                    if (result != DialogResult.Yes)
+                    {
+                        return; // 복사 취소
+                    }
+                }
+            }
+
+            try
+            {
+                // 덮어쓰기 허용하여 복사
+                File.Copy(sourcePath, destPath, true);
+                refreshNeeded = true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"'{fileName}' 복사 중 오류 발생: {ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void CopyDirectoryRecursively(string sourcePath, string destPath, ref bool refreshNeeded)
+        {
+            try
+            {
+                if (!Directory.Exists(destPath))
+                {
+                    Directory.CreateDirectory(destPath);
+                    refreshNeeded = true;
+                }
+
+                // 폴더 내 파일 복사
+                foreach (string file in Directory.GetFiles(sourcePath))
+                {
+                    string destFile = Path.Combine(destPath, Path.GetFileName(file));
+                    CopySingleFile(file, destFile, Path.GetFileName(file), ref refreshNeeded);
+                }
+
+                // 하위 폴더 재귀 복사
+                foreach (string dir in Directory.GetDirectories(sourcePath))
+                {
+                    string destDir = Path.Combine(destPath, Path.GetFileName(dir));
+                    CopyDirectoryRecursively(dir, destDir, ref refreshNeeded);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"폴더 복사 중 오류 발생: {ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
