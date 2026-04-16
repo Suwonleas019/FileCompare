@@ -30,12 +30,88 @@ namespace FileCompare
 
         private void btnCopyFromLeft_Click_1(object sender, EventArgs e)
         {
-
+            CopySelectedFiles(lvwLeftDir, txtLeftDir.Text, txtRightDir.Text);
         }
 
         private void btnCopyFromRight_Click_1(object sender, EventArgs e)
         {
+            CopySelectedFiles(lvwRightDir, txtRightDir.Text, txtLeftDir.Text);
+        }
 
+        private void CopySelectedFiles(ListView sourceLV, string sourceDir, string destDir)
+        {
+            // 양쪽 경로가 모두 있는지 확인
+            if (string.IsNullOrWhiteSpace(sourceDir) || string.IsNullOrWhiteSpace(destDir))
+            {
+                MessageBox.Show("양쪽 폴더가 모두 선택되어 있어야 합니다.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (!Directory.Exists(destDir))
+            {
+                MessageBox.Show("대상 폴더가 존재하지 않습니다.", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (sourceLV.SelectedItems.Count == 0)
+            {
+                MessageBox.Show("복사할 파일을 선택하세요.", "알림", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            bool refreshNeeded = false;
+
+            foreach (ListViewItem item in sourceLV.SelectedItems)
+            {
+                // 폴더(<DIR>)는 복사 제외 처리
+                if (item.SubItems.Count > 1 && item.SubItems[1].Text == "<DIR>")
+                    continue;
+
+                string fileName = item.Text;
+                string sourcePath = Path.Combine(sourceDir, fileName);
+                string destPath = Path.Combine(destDir, fileName);
+
+                // 대상 경로에 파일이 이미 존재하는 경우 날짜 확인
+                if (File.Exists(destPath))
+                {
+                    DateTime sourceTime = File.GetLastWriteTime(sourcePath);
+                    DateTime destTime = File.GetLastWriteTime(destPath);
+
+                    // 복사하려는 원본 파일이 대상 파일보다 오래된 경우
+                    if (sourceTime < destTime)
+                    {
+                        var result = MessageBox.Show(
+                            $"'{fileName}' 파일은 대상 폴더의 파일보다 지연된(오래된) 파일입니다.\n이전 버전의 파일로 덮어쓰시겠습니까?",
+                            "확인",
+                            MessageBoxButtons.YesNo,
+                            MessageBoxIcon.Warning);
+
+                        if (result != DialogResult.Yes)
+                        {
+                            continue; // 복사 취소하고 다음 파일로 넘어감
+                        }
+                    }
+                }
+
+                try
+                {
+                    // 덮어쓰기 허용하여 복사
+                    File.Copy(sourcePath, destPath, true);
+                    refreshNeeded = true;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"'{fileName}' 복사 중 오류 발생: {ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+
+            // 복사된 파일이 하나라도 있으면 양쪽 리스트 모두 새로고침
+            if (refreshNeeded)
+            {
+                PopulateListView(lvwLeftDir, txtLeftDir.Text);
+                PopulateListView(lvwRightDir, txtRightDir.Text);
+                CompareFiles();
+            }
         }
 
         private void btnLeftDir_Click_1(object sender, EventArgs e)
@@ -180,14 +256,15 @@ namespace FileCompare
 
         private void ListView_DrawItem(object sender, DrawListViewItemEventArgs e)
         {
-            // Details 뷰에서는 서브아이템(DrawSubItem)에서 실제 텍스트를 그리므로 여기서는 배경만 처리
-            e.DrawBackground();
+            // Details 뷰에서는 서브아이템(DrawSubItem)에서 배경과 텍스트를 모두 그리므로 생략합니다.
         }
 
         private void ListView_DrawSubItem(object sender, DrawListViewSubItemEventArgs e)
         {
-            // 선택된 항목에 대한 배경색 처리
-            if (e.Item.Selected)
+            bool isSelected = e.Item.Selected;
+
+            // 선택 상태에 따른 커스텀 배경 그리기
+            if (isSelected)
             {
                 e.Graphics.FillRectangle(SystemBrushes.Highlight, e.Bounds);
             }
@@ -199,13 +276,23 @@ namespace FileCompare
                 }
             }
 
-            // 앞서 CompareFiles()에서 결정된 ForeColor 값을 가져와서 직접 브러쉬로 그리기
-            Color textColor = e.Item.Selected ? SystemColors.HighlightText : e.Item.ForeColor;
+            // 앞서 CompareFiles()에서 결정된 ForeColor 값 적용
+            Color textColor = isSelected ? SystemColors.HighlightText : e.Item.ForeColor;
 
-            Rectangle textBounds = new Rectangle(e.Bounds.X + 2, e.Bounds.Y, e.Bounds.Width - 2, e.Bounds.Height);
-            TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
+            // TextRenderer 대신 DrawString을 사용하여 Hover 시 사라지는 문제 방지
+            Rectangle textBounds = new Rectangle(e.Bounds.X + 4, e.Bounds.Y, e.Bounds.Width - 4, e.Bounds.Height);
+            using (StringFormat sf = new StringFormat())
+            {
+                sf.Alignment = StringAlignment.Near;
+                sf.LineAlignment = StringAlignment.Center;
+                sf.FormatFlags = StringFormatFlags.NoWrap;
+                sf.Trimming = StringTrimming.EllipsisCharacter;
 
-            TextRenderer.DrawText(e.Graphics, e.SubItem.Text, e.Item.Font, textBounds, textColor, flags);
+                using (SolidBrush textBrush = new SolidBrush(textColor))
+                {
+                    e.Graphics.DrawString(e.SubItem.Text, e.SubItem.Font, textBrush, textBounds, sf);
+                }
+            }
         }
 
         private void splitContainer1_Panel1_Paint(object sender, PaintEventArgs e)
